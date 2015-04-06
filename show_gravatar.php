@@ -26,9 +26,8 @@ class show_gravatar extends rcube_plugin
   private $default_size = 48;
   private $default_rating = 'g';
   private $default_default = 'identicon';
-  private $gravatar_port = 80;
-  private $gravatar_hostname = 'www.gravatar.com';
-  private $gravatar_url = 'http://www.gravatar.com/';
+  private $gravatar_url = array('http://cdn.libravatar.org/', 'http://www.gravatar.com/');
+  private $gravatar_surl = array('https://seccdn.libravatar.org/', 'https://secure.gravatar.com/');
   private $nativepics = false;
 
   function init()
@@ -39,9 +38,7 @@ class show_gravatar extends rcube_plugin
     $this->nativepics = !version_compare(RCMAIL_VERSION, '0.9-x', '<');  // Roundcube >= 0.9 has native support for contact pics in mail view
 
     if ( $this->is_https() ) {
-      $this->gravatar_port = 443;
-      $this->gravatar_hostname = 'secure.gravatar.com';
-      $this->gravatar_url = 'https://secure.gravatar.com/';
+      $this->gravatar_url = $this->gravatar_surl;
     }
     
     // render gravatar picture directly into email preview in pre-0.9 versions
@@ -217,10 +214,14 @@ class show_gravatar extends rcube_plugin
 
       if ($email) {
         $this->gravatar_id = md5(strtolower($email));
-        $url = $this->gravatar_url();
+        $i = 0;
+        do {
+          $url = $this->gravatar_url($i);
+          $headers = get_headers($url);
+          $i++;
+        } while (!(is_array($headers) && $this->valid_response($headers[0])) && ($i < count($this->gravatar_url)));
 
-        $headers = get_headers($url);
-        if (is_array($headers) && preg_match("/200 OK/", $headers[0]))
+        if (is_array($headers) && $this->valid_response($headers[0]))
           $p['url'] = $url;
       }
     }
@@ -228,6 +229,10 @@ class show_gravatar extends rcube_plugin
     return $p;
   }
 
+  function valid_response($response)
+  {
+    return (preg_match("/200 OK/", $response) || preg_match("/ 307 /", $response));
+  }
   function message_load($p)
   {
     $this->sender = (array)$p['object']->sender;
@@ -236,7 +241,12 @@ class show_gravatar extends rcube_plugin
 
   function gravatar()
   {
-    $url = $this->gravatar_url();
+    $i = 0;
+    do {
+      $url = $this->gravatar_url($i);
+      $headers = get_headers($url);
+      $i++;
+    } while (( !is_array($headers) || preg_match("/404 Not Found/", $headers[0]) ) && ($i < count($this->gravatar_url))) ;
 
     // check if remote image doesn't return 404 if we use
     // 404 for default gravatar
@@ -251,9 +261,9 @@ class show_gravatar extends rcube_plugin
       html::img(array('src' => $url, 'title' => 'Gravatar')));
   }
 
-  function gravatar_url()
+  function gravatar_url($i)
   {
-    return $this->gravatar_url . "avatar/" . $this->gravatar_id
+    return $this->gravatar_url[$i] . "avatar/" . $this->gravatar_id
       . "?s=" . $this->size
       . "&r=" . $this->rating
       . "&d=" . $this->default;
